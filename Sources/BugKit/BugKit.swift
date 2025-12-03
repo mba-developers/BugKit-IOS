@@ -16,13 +16,13 @@ public class BugKit {
     var isFloatingButtonEnabled = false
     
     private var floatingButtonWindow: UIWindow?
+    private var observer: NSObjectProtocol?
     
     private init() {}
     
     public static func start(with apiKey: String, baseUrl: String) {
         shared.apiKey = apiKey
         shared.baseUrl = baseUrl
-        
         UIWindow.enableShakeDetection()
         CrashHandler.setup()
     }
@@ -52,7 +52,7 @@ public class BugKit {
     }
     
     private func showFloatingButton() {
-        guard floatingButtonWindow == nil else { return }
+        if floatingButtonWindow != nil { return }
         
         let activeScene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -61,36 +61,88 @@ public class BugKit {
         if let windowScene = activeScene {
             createWindow(in: windowScene)
         } else {
-            NotificationCenter.default.addObserver(
+            if let existing = observer { NotificationCenter.default.removeObserver(existing) }
+            observer = NotificationCenter.default.addObserver(
                 forName: UIScene.didActivateNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.showFloatingButton()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self?.showFloatingButton()
+                }
             }
         }
     }
     
     private func createWindow(in windowScene: UIWindowScene) {
+        if let observer = observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+        
         let window = UIWindow(windowScene: windowScene)
         let screenWidth = UIScreen.main.bounds.width
         let screenHeight = UIScreen.main.bounds.height
         
-        window.frame = CGRect(x: screenWidth - 80, y: screenHeight - 150, width: 60, height: 60)
-        window.windowLevel = .alert + 1
+        // Initial Position (Bottom Right)
+        let buttonSize: CGFloat = 60
+        window.frame = CGRect(x: screenWidth - buttonSize - 20, y: screenHeight - 150, width: buttonSize, height: buttonSize)
+        window.windowLevel = UIWindow.Level.statusBar + 100
         window.backgroundColor = .clear
         
         if #available(iOS 14.0, *) {
-            let button = FloatingButtonView { [weak self] in
-                self?.triggerReport()
-            }
+            let button = FloatingButtonView() // Simple View
             let controller = UIHostingController(rootView: button)
             controller.view.backgroundColor = .clear
             window.rootViewController = controller
+            
+            // --- ATTACH GESTURES TO THE WINDOW ROOT VIEW ---
+            let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            
+            controller.view.addGestureRecognizer(panGesture)
+            controller.view.addGestureRecognizer(tapGesture)
         }
         
+        window.isHidden = false
         window.makeKeyAndVisible()
         self.floatingButtonWindow = window
+    }
+    
+    @objc private func handleTap() {
+        triggerReport()
+    }
+    
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard let window = floatingButtonWindow else { return }
+        let translation = gesture.translation(in: window)
+        
+        switch gesture.state {
+        case .began, .changed:
+            // Move the Window center
+            window.center = CGPoint(x: window.center.x + translation.x, y: window.center.y + translation.y)
+            gesture.setTranslation(.zero, in: window)
+            
+        case .ended, .cancelled:
+            // Snap Logic
+            let screenWidth = UIScreen.main.bounds.width
+            let buttonWidth = window.frame.width
+            
+            // Determine closest edge
+            let finalX: CGFloat
+            if window.center.x < screenWidth / 2 {
+                finalX = buttonWidth / 2 + 10 // Left Edge + padding
+            } else {
+                finalX = screenWidth - (buttonWidth / 2) - 10 // Right Edge - padding
+            }
+            
+            // Animate Snap
+            UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5, options: .curveEaseOut) {
+                window.center = CGPoint(x: finalX, y: window.center.y)
+            }
+            
+        default: break
+        }
     }
     
     private func hideFloatingButton() {
@@ -122,3 +174,4 @@ extension UIWindow {
     }
 }
 #endif
+
