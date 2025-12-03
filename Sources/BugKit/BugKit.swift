@@ -54,24 +54,43 @@ public class BugKit {
     private func showFloatingButton() {
         guard floatingButtonWindow == nil else { return }
         
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            let window = UIWindow(windowScene: windowScene)
-            window.frame = CGRect(x: UIScreen.main.bounds.width - 80, y: UIScreen.main.bounds.height - 150, width: 60, height: 60)
-            window.windowLevel = .alert + 1
-            window.backgroundColor = .clear
-            
-            if #available(iOS 14.0, *) {
-                let button = FloatingButtonView { [weak self] in
-                    self?.triggerReport()
-                }
-                let controller = UIHostingController(rootView: button)
-                controller.view.backgroundColor = .clear
-                window.rootViewController = controller
+        let activeScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        
+        if let windowScene = activeScene {
+            createWindow(in: windowScene)
+        } else {
+            NotificationCenter.default.addObserver(
+                forName: UIScene.didActivateNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.showFloatingButton()
             }
-            
-            window.makeKeyAndVisible()
-            self.floatingButtonWindow = window
         }
+    }
+    
+    private func createWindow(in windowScene: UIWindowScene) {
+        let window = UIWindow(windowScene: windowScene)
+        let screenWidth = UIScreen.main.bounds.width
+        let screenHeight = UIScreen.main.bounds.height
+        
+        window.frame = CGRect(x: screenWidth - 80, y: screenHeight - 150, width: 60, height: 60)
+        window.windowLevel = .alert + 1
+        window.backgroundColor = .clear
+        
+        if #available(iOS 14.0, *) {
+            let button = FloatingButtonView { [weak self] in
+                self?.triggerReport()
+            }
+            let controller = UIHostingController(rootView: button)
+            controller.view.backgroundColor = .clear
+            window.rootViewController = controller
+        }
+        
+        window.makeKeyAndVisible()
+        self.floatingButtonWindow = window
     }
     
     private func hideFloatingButton() {
@@ -81,9 +100,7 @@ public class BugKit {
 }
 
 extension UIWindow {
-    static func enableShakeDetection() {
-        // iOS handles shake automatically via motionEnded
-    }
+    static func enableShakeDetection() { }
     
     open override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         if motion == .motionShake {
